@@ -4,7 +4,6 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
   Put,
   Query,
   Req,
@@ -17,6 +16,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -28,6 +28,7 @@ import { UsersListResponseDto } from './dto/users-list-response.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import type { JwtRequest } from '../auth/interfaces/jwt-request.interface.js';
 import { ErrorResponseDto } from '../common/dto/error-response.dto.js';
+import { MAX_DB_ID, ParseIdPipe } from '../common/pipes/parse-id.pipe.js';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -54,6 +55,10 @@ export class UsersController {
   }
 
   @ApiOperation({ summary: 'Get user by ID' })
+  @ApiParam({
+    name: 'id',
+    schema: { type: 'integer', minimum: 1, maximum: MAX_DB_ID },
+  })
   @ApiOkResponse({ type: UserResponseDto })
   @ApiBadRequestResponse({
     description: 'Invalid user ID',
@@ -64,9 +69,7 @@ export class UsersController {
     type: ErrorResponseDto,
   })
   @Get(':id')
-  findUserById(
-    @Param('id', ParseIntPipe) id: number,
-  ): Promise<UserResponseDto> {
+  findUserById(@Param('id', ParseIdPipe) id: number): Promise<UserResponseDto> {
     return this.usersService.findUserById(id);
   }
 
@@ -81,7 +84,7 @@ export class UsersController {
     type: ErrorResponseDto,
   })
   @ApiConflictResponse({
-    description: 'Login or email already exists',
+    description: 'Login or email already taken by another user',
     type: ErrorResponseDto,
   })
   @Put('me')

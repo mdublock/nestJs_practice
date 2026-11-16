@@ -10,17 +10,19 @@ import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import databaseConfig from '../config/database.config.js';
 import { Database } from './database.types.js';
+import { DATABASE, DATABASE_CONNECTION } from './database.constants.js';
 
 @Injectable()
 export class DatabaseService implements OnApplicationShutdown {
+  private readonly logger = new Logger('Database');
   constructor(
-    @Inject('DATABASE')
+    @Inject(DATABASE)
     private readonly db: Kysely<Database>,
   ) {}
 
   async onApplicationShutdown() {
     await this.db.destroy();
-    console.log('Database connection closed');
+    this.logger.log('Database connection closed');
   }
 }
 
@@ -28,7 +30,7 @@ export class DatabaseService implements OnApplicationShutdown {
   providers: [
     DatabaseService,
     {
-      provide: 'DATABASE_CONNECTION',
+      provide: DATABASE_CONNECTION,
       inject: [databaseConfig.KEY],
       useFactory: async (config: ConfigType<typeof databaseConfig>) => {
         const logger = new Logger('Database');
@@ -47,19 +49,19 @@ export class DatabaseService implements OnApplicationShutdown {
         });
 
         await pool.query('SELECT 1');
-        console.log('Database connection established');
+        logger.log('Database connection established');
         return pool;
       },
     },
     {
-      provide: 'DATABASE',
-      inject: ['DATABASE_CONNECTION'],
+      provide: DATABASE,
+      inject: [DATABASE_CONNECTION],
       useFactory: (pool: Pool) =>
         new Kysely<Database>({
           dialect: new PostgresDialect({ pool }),
         }),
     },
   ],
-  exports: ['DATABASE_CONNECTION', 'DATABASE'],
+  exports: [DATABASE_CONNECTION, DATABASE],
 })
 export class DatabaseModule {}

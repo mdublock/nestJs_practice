@@ -1,9 +1,11 @@
 import type { E2eTestStore, TestUser } from '../e2e-test.module.js';
 
+const isSameEmail = (a: string, b: string | undefined): boolean =>
+  b !== undefined && a.toLowerCase() === b.toLowerCase();
 export class UsersRepositoryMock {
   constructor(private readonly store: E2eTestStore) {}
 
-  async create(userData: {
+  private async create(userData: {
     login: string;
     email: string;
     password_hash: string;
@@ -14,8 +16,10 @@ export class UsersRepositoryMock {
       throw { code: '23505', constraint: 'users_login_key' };
     }
 
-    if (this.store.users.some((user) => user.email === userData.email)) {
-      throw { code: '23505', constraint: 'users_email_key' };
+    if (
+      this.store.users.some((user) => isSameEmail(user.email, userData.email))
+    ) {
+      throw { code: '23505', constraint: 'users_email_lower_key' };
     }
 
     const user: TestUser = {
@@ -30,6 +34,42 @@ export class UsersRepositoryMock {
 
     this.store.users.push(user);
     return user;
+  }
+
+  async createWithRefreshToken<T>(
+    userData: {
+      login: string;
+      email: string;
+      password_hash: string;
+      age?: number | null;
+      about?: string | null;
+    },
+    issueRefreshToken: (userId: number) => Promise<{
+      tokenData: {
+        user_id: number;
+        jti: string;
+        token_hash: string;
+        expires_at: Date;
+      };
+      result: T;
+    }>,
+  ): Promise<T> {
+    const user = await this.create(userData);
+
+    try {
+      const { tokenData, result } = await issueRefreshToken(user.id);
+
+      this.store.refreshTokens.push({
+        id: this.store.nextRefreshTokenId++,
+        ...tokenData,
+        revoked: false,
+      });
+
+      return result;
+    } catch (error) {
+      this.store.users = this.store.users.filter((item) => item !== user);
+      throw error;
+    }
   }
 
   async findById(id: number) {
@@ -49,8 +89,8 @@ export class UsersRepositoryMock {
     userData: {
       login?: string;
       email?: string;
-      age?: number;
-      about?: string;
+      age?: number | null;
+      about?: string | null;
     },
   ) {
     const user = this.store.users.find(
@@ -73,13 +113,18 @@ export class UsersRepositoryMock {
     if (
       userData.email !== undefined &&
       this.store.users.some(
-        (item) => item.id !== id && item.email === userData.email,
+        (item) => item.id !== id && isSameEmail(item.email, userData.email),
       )
     ) {
-      throw { code: '23505', constraint: 'users_email_key' };
+      throw { code: '23505', constraint: 'users_email_lower_key' };
     }
 
-    Object.assign(user, userData);
+    const { login, email, age, about } = userData;
+
+    if (login !== undefined) user.login = login;
+    if (email !== undefined) user.email = email;
+    if (age !== undefined) user.age = age;
+    if (about !== undefined) user.about = about;
 
     return {
       id: user.id,

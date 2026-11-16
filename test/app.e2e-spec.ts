@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { ConfigType } from '@nestjs/config';
 import request from 'supertest';
+import type { Server } from 'node:http';
 import jwtConfig from '../src/config/jwt.config.js';
 import { createE2eTestApp, E2eTestStore } from './e2e-test.module.js';
 type TokenPair = {
@@ -10,7 +11,7 @@ type TokenPair = {
 };
 
 describe('Application (e2e)', () => {
-  let app: INestApplication;
+  let app: INestApplication<Server>;
   let store: E2eTestStore;
 
   beforeEach(async () => {
@@ -129,6 +130,44 @@ describe('Application (e2e)', () => {
         password: 'StrongPassword123',
       })
       .expect(401);
+  });
+
+  it('POST /auth/register should limit the password to 72 bytes', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        login: 'byte_ok_user',
+        email: 'byte_ok@example.com',
+        password: 'я'.repeat(36),
+      })
+      .expect(201);
+
+    const response = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        login: 'byte_limit_user',
+        email: 'byte_limit@example.com',
+        password: 'я'.repeat(36) + 'a',
+      })
+      .expect(400);
+
+    expect(response.body).toEqual({
+      statusCode: 400,
+      message: ['Password must be at most 72 bytes in UTF-8'],
+    });
+    expect(store.users).toHaveLength(1);
+  });
+
+  it('POST /auth/login should reject a password longer than 72 bytes', async () => {
+    await registerUser('byte_login_user');
+
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({
+        login: 'byte_login_user',
+        password: 'я'.repeat(36) + 'b',
+      })
+      .expect(400);
   });
 
   it('POST /auth/login should return 401 for incorrect password', async () => {
@@ -302,6 +341,33 @@ describe('Application (e2e)', () => {
     expect(store.refreshTokens).toHaveLength(0);
   });
 
+  it('POST /auth/register should store the email in lower case and reject it in another case', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        login: 'case_user',
+        email: '  Case.User@Example.COM ',
+        password: 'StrongPassword123',
+      })
+      .expect(201);
+
+    expect(store.users[0].email).toBe('case.user@example.com');
+
+    const response = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        login: 'case_user_two',
+        email: 'CASE.USER@example.com',
+        password: 'StrongPassword123',
+      })
+      .expect(409);
+
+    expect(response.body).toEqual({
+      statusCode: 409,
+      message: 'User with this email already exists',
+    });
+  });
+
   it('POST /auth/register should return 409 for a taken login', async () => {
     await registerUser('duplicate_user');
 
@@ -431,6 +497,45 @@ describe('Application (e2e)', () => {
     });
   });
 
+  it('PUT /users/me should return 409 for an email taken by another user', async () => {
+    await registerUser('first_user');
+    const { accessToken } = await registerUser('second_user');
+
+    const response = await request(app.getHttpServer())
+      .put('/users/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ email: 'first_user@example.com' })
+      .expect(409);
+
+    expect(response.body).toEqual({
+      statusCode: 409,
+      message: 'User with this email already exists',
+    });
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['an empty body', {}],
+    ['the validator service field', { age: 25, _atLeastOneField: true }],
+    ['an unknown field', { nickname: 'new_nick' }],
+    ['login: null', { login: null }],
+    ['email: null', { email: null }],
+    ['about longer than 1000 characters', { about: 'a'.repeat(1001) }],
+  ])(
+    'PUT /users/me should return 400 for %s and keep the profile unchanged',
+    async (_name, body) => {
+      const { accessToken } = await registerUser('invalid_update_user');
+      const before = { ...store.users[0] };
+
+      await request(app.getHttpServer())
+        .put('/users/me')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(body)
+        .expect(400);
+
+      expect(store.users[0]).toEqual(before);
+    },
+  );
+
   it('GET /users should return users list with pagination', async () => {
     const registerResponse = await request(app.getHttpServer())
       .post('/auth/register')
@@ -479,7 +584,7 @@ describe('Application (e2e)', () => {
         {
           id: store.users[2].id,
           login: 'ALICE_two',
-          email: 'ALICE_two@example.com',
+          email: 'alice_two@example.com',
           age: null,
           about: null,
         },
@@ -505,6 +610,23 @@ describe('Application (e2e)', () => {
       message: ['limit must not be greater than 100'],
     });
   });
+
+  it.each(['2147483648', '0', '-1', 'abc', '1.5'])(
+    'GET /users/%s should return 400 for an ID outside the int4 range',
+    async (id) => {
+      const { accessToken } = await registerUser('id_check_user');
+
+      const response = await request(app.getHttpServer())
+        .get(`/users/${id}`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(400);
+
+      expect(response.body).toEqual({
+        statusCode: 400,
+        message: 'id must be an integer between 1 and 2147483647',
+      });
+    },
+  );
 
   it('GET /users/:id should return user by ID', async () => {
     const registerResponse = await request(app.getHttpServer())

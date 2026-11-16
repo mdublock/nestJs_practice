@@ -1,9 +1,10 @@
 import { Insertable, Kysely } from 'kysely';
 import { Database } from '../database/database.types.js';
+import { DATABASE } from '../database/database.constants.js';
 import { Inject } from '@nestjs/common';
 
 export class RefreshTokensRepository {
-  constructor(@Inject('DATABASE') private db: Kysely<Database>) {}
+  constructor(@Inject(DATABASE) private db: Kysely<Database>) {}
 
   async create(tokenData: Insertable<Database['refresh_tokens']>) {
     const newToken = await this.db

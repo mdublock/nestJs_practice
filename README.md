@@ -313,12 +313,13 @@ Database data is stored in the named Docker volume and is preserved when the con
 ## Known Limitations
 
 - **bcrypt input limit.** bcrypt uses only the first 72 bytes of its input.
-  - Passwords: `MaxLength(72)` in the DTO counts characters, not bytes. A password with multi-byte characters (for example, Cyrillic) can exceed 72 bytes, and the tail is ignored.
+  - Passwords are validated with `@IsByteLength(0, 72)` at registration and login, so bcrypt never truncates them.
   - Refresh tokens: a JWT is longer than 72 bytes, so the stored bcrypt hash covers only the token header and the beginning of the payload. Refresh tokens are still protected by the JWT signature check, the `type` claim, the `jti` lookup and rotation. The hash comparison is an additional check.
 - **Migration `003_add_jti_to_refresh_tokens`** adds a `NOT NULL UNIQUE` column without a default value. It runs on an empty database (setup from scratch), but would fail on a `refresh_tokens` table that already contains rows. The migration is not rewritten because it has already been applied.
 - **Soft delete and uniqueness.** The `UNIQUE` constraints on `login` and `email` also apply to soft-deleted rows, so a deleted user's login and email cannot be reused.
 - **Offset pagination.** `GET /users` uses `LIMIT/OFFSET` with a stable order by `id`. On very large tables, deep pages become slower than cursor-based pagination.
 - **E2E tests** use in-memory repository mocks and do not run against a real PostgreSQL instance.
+- **Email case.** New emails are stored trimmed and in lower case, and uniqueness is enforced on `lower(email)` (migration `007`). Emails saved before that migration keep their original case.
 
 ## License
 

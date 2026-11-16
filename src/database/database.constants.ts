@@ -1,0 +1,2 @@
+export const DATABASE = 'DATABASE';
+export const DATABASE_CONNECTION = 'DATABASE_CONNECTION';

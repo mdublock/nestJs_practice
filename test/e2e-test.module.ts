@@ -1,11 +1,15 @@
 import { Test } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import type { Server } from 'node:http';
 import { AppModule } from '../src/app.module.js';
 import { UsersRepositoryMock } from './mocks/users.repository.mock.js';
 import { RefreshTokensRepositoryMock } from './mocks/refresh-tokens.repository.mock.js';
-
 import { UsersRepository } from '../src/users/users.repository.js';
 import { RefreshTokensRepository } from '../src/auth/refresh-tokens.repository.js';
+import {
+  DATABASE,
+  DATABASE_CONNECTION,
+} from '../src/database/database.constants.js';
 
 export interface TestUser {
   id: number;
@@ -55,15 +59,15 @@ export async function createE2eTestApp() {
     .useFactory({
       factory: () => new RefreshTokensRepositoryMock(store),
     })
-    .overrideProvider('DATABASE')
+    .overrideProvider(DATABASE)
     .useValue({
       destroy: async () => {},
     })
-    .overrideProvider('DATABASE_CONNECTION')
+    .overrideProvider(DATABASE_CONNECTION)
     .useValue({})
     .compile();
 
-  const app: INestApplication = moduleRef.createNestApplication();
+  const app = moduleRef.createNestApplication<INestApplication<Server>>();
 
   await app.init();
 

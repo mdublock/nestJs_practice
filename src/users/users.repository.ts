@@ -1,20 +1,37 @@
-import { Insertable, Kysely } from 'kysely';
+import { Insertable, Kysely, Updateable } from 'kysely';
 import { Database } from '../database/database.types.js';
+import { DATABASE } from '../database/database.constants.js';
 import { Inject } from '@nestjs/common';
 import { UsersQueryDto } from './dto/users-query.dto.js';
-import { UpdateUserDto } from './dto/update-user.dto.js';
+import { escapeLikePattern } from '../database/escape-like-pattern.js';
 
+type UpdatableUserFields = Pick<
+  Updateable<Database['users']>,
+  'login' | 'email' | 'age' | 'about'
+>;
 export class UsersRepository {
-  constructor(@Inject('DATABASE') private db: Kysely<Database>) {}
+  constructor(@Inject(DATABASE) private db: Kysely<Database>) {}
 
-  async create(userData: Insertable<Database['users']>) {
-    const newUser = await this.db
-      .insertInto('users')
-      .values(userData)
-      .returning(['id', 'login', 'email', 'deleted_at'])
-      .executeTakeFirstOrThrow();
+  async createWithRefreshToken<T>(
+    userData: Insertable<Database['users']>,
+    issueRefreshToken: (userId: number) => Promise<{
+      tokenData: Insertable<Database['refresh_tokens']>;
+      result: T;
+    }>,
+  ): Promise<T> {
+    return this.db.transaction().execute(async (trx) => {
+      const user = await trx
+        .insertInto('users')
+        .values(userData)
+        .returning('id')
+        .executeTakeFirstOrThrow();
 
-    return newUser;
+      const { tokenData, result } = await issueRefreshToken(user.id);
+
+      await trx.insertInto('refresh_tokens').values(tokenData).execute();
+
+      return result;
+    });
   }
 
   async findById(id: number) {
@@ -40,10 +57,12 @@ export class UsersRepository {
     return result;
   }
 
-  async updateUser(id: number, userData: UpdateUserDto) {
+  async updateUser(id: number, userData: UpdatableUserFields) {
+    const { login, email, age, about } = userData;
+
     return this.db
       .updateTable('users')
-      .set(userData)
+      .set({ login, email, age, about })
       .where('id', '=', id)
       .where('deleted_at', 'is', null)
       .returning(['id', 'login', 'email', 'age', 'about'])
@@ -79,8 +98,10 @@ export class UsersRepository {
       .where('deleted_at', 'is', null);
 
     if (search) {
-      usersQuery = usersQuery.where('login', 'ilike', `%${search}%`);
-      countQuery = countQuery.where('login', 'ilike', `%${search}%`);
+      const pattern = `%${escapeLikePattern(search)}%`;
+
+      usersQuery = usersQuery.where('login', 'ilike', pattern);
+      countQuery = countQuery.where('login', 'ilike', pattern);
     }
 
     const [users, countResult] = await Promise.all([

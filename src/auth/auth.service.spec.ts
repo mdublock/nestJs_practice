@@ -1,17 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service.js';
-import { UsersService } from '../users/users.service.js';
 import { UsersRepository } from '../users/users.repository.js';
 import { AuthCryptoProvider } from './auth-crypto.provider.js';
 import { RefreshTokensRepository } from './refresh-tokens.repository.js';
 
 describe('AuthService', () => {
-  const usersServiceMock = {
-    createUser: vi.fn(),
-  };
-
   const usersRepositoryMock = {
+    createWithRefreshToken: vi.fn(),
     findByLogin: vi.fn(),
     findById: vi.fn(),
   };
@@ -62,10 +58,6 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         {
-          provide: UsersService,
-          useValue: usersServiceMock,
-        },
-        {
           provide: UsersRepository,
           useValue: usersRepositoryMock,
         },
@@ -88,27 +80,27 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    it('should register user', async () => {
+    type IssueRefreshToken = (
+      userId: number,
+    ) => Promise<{ tokenData: unknown; result: unknown }>;
+
+    it('should create the user and the first refresh token together', async () => {
       const userData = {
         login: 'test_user',
         email: 'test@example.com',
         password: 'StrongPassword123',
       };
-
-      const createdUser = {
-        id: 1,
-        login: 'test_user',
-        email: 'test@example.com',
-        deleted_at: null,
-      };
-
-      usersServiceMock.createUser.mockResolvedValue(createdUser);
+      let issuedTokenData: unknown;
 
       authCryptoProviderMock.hashPassword.mockResolvedValue('hashed-password');
-
       mockTokenPair();
-
-      refreshTokensRepositoryMock.create.mockResolvedValue({ id: 1 });
+      usersRepositoryMock.createWithRefreshToken.mockImplementation(
+        async (_userData: unknown, issueRefreshToken: IssueRefreshToken) => {
+          const { tokenData, result } = await issueRefreshToken(1);
+          issuedTokenData = tokenData;
+          return result;
+        },
+      );
 
       const result = await service.register(userData);
 
@@ -121,75 +113,42 @@ describe('AuthService', () => {
         userData.password,
       );
 
-      expect(usersServiceMock.createUser).toHaveBeenCalledWith(
+      expect(usersRepositoryMock.createWithRefreshToken).toHaveBeenCalledWith(
         expect.objectContaining({
           login: userData.login,
           email: userData.email,
           password_hash: 'hashed-password',
         }),
+        expect.any(Function),
       );
 
-      expect(usersServiceMock.createUser.mock.calls[0][0]).not.toHaveProperty(
-        'password',
-      );
+      expect(
+        usersRepositoryMock.createWithRefreshToken.mock.calls[0][0],
+      ).not.toHaveProperty('password');
 
-      expect(authCryptoProviderMock.signAccessToken).toHaveBeenCalledWith(
-        createdUser.id,
-      );
-
+      expect(authCryptoProviderMock.signAccessToken).toHaveBeenCalledWith(1);
       expect(authCryptoProviderMock.signRefreshToken).toHaveBeenCalledWith(
-        createdUser.id,
+        1,
         expect.any(String),
       );
 
-      expect(authCryptoProviderMock.hashRefreshToken).toHaveBeenCalledWith(
-        'refreshToken',
-      );
-
-      expect(refreshTokensRepositoryMock.create).toHaveBeenCalledWith(
+      expect(issuedTokenData).toEqual(
         expect.objectContaining({
-          user_id: createdUser.id,
+          user_id: 1,
           jti: expect.any(String),
           token_hash: 'hashed-refreshToken',
           expires_at: expiresAt,
         }),
       );
+
+      expect(refreshTokensRepositoryMock.create).not.toHaveBeenCalled();
     });
 
-    it('should throw ConflictException if login already exists', async () => {
-      usersServiceMock.createUser.mockRejectedValue({
-        code: '23505',
-        constraint: 'users_login_key',
-      });
-
-      await expect(
-        service.register({
-          login: 'test_user',
-          email: 'test@example.com',
-          password: 'StrongPassword123',
-        }),
-      ).rejects.toThrow('User with this login already exists');
-    });
-
-    it('should throw ConflictException if email already exists', async () => {
-      usersServiceMock.createUser.mockRejectedValue({
-        code: '23505',
-        constraint: 'users_email_key',
-      });
-
-      await expect(
-        service.register({
-          login: 'test_user',
-          email: 'test@example.com',
-          password: 'StrongPassword123',
-        }),
-      ).rejects.toThrow('User with this email already exists');
-    });
-
-    it('should rethrow unknown errors', async () => {
+    it('should rethrow repository errors', async () => {
       const error = new Error('Database connection error');
 
-      usersServiceMock.createUser.mockRejectedValue(error);
+      authCryptoProviderMock.hashPassword.mockResolvedValue('hashed-password');
+      usersRepositoryMock.createWithRefreshToken.mockRejectedValue(error);
 
       await expect(
         service.register({

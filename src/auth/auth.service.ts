@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { UsersService } from '../users/users.service.js';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { LoginDto } from './dto/login.dto.js';
 import { UsersRepository } from '../users/users.repository.js';
 import { AuthCryptoProvider } from './auth-crypto.provider.js';
@@ -11,17 +6,9 @@ import { randomUUID } from 'crypto';
 import { RefreshTokensRepository } from './refresh-tokens.repository.js';
 import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 
-function isDatabaseError(error: unknown): error is {
-  constraint?: string;
-  code: string;
-} {
-  return typeof error === 'object' && error !== null && 'code' in error;
-}
-
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UsersService,
     private usersRepository: UsersRepository,
     private authCryptoProvider: AuthCryptoProvider,
     private refreshTokensRepository: RefreshTokensRepository,
@@ -57,37 +44,27 @@ export class AuthService {
     age?: number;
     about?: string;
   }) {
-    try {
-      const user = await this.usersService.createUser({
+    const passwordHash = await this.authCryptoProvider.hashPassword(
+      userData.password,
+    );
+
+    return this.usersRepository.createWithRefreshToken(
+      {
         login: userData.login,
         email: userData.email,
-        password_hash: await this.authCryptoProvider.hashPassword(
-          userData.password,
-        ),
+        password_hash: passwordHash,
         age: userData.age,
         about: userData.about,
-      });
+      },
+      async (userId) => {
+        const { accessToken, refreshToken, tokenData } =
+          await this.generateTokenPair(userId);
 
-      const tokens = await this.generateTokenPair(user.id);
-      await this.refreshTokensRepository.create(tokens.tokenData);
-
-      return {
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-      };
-    } catch (error) {
-      if (isDatabaseError(error) && error.code === '23505') {
-        if (error.constraint === 'users_login_key') {
-          throw new ConflictException('User with this login already exists');
-        }
-
-        if (error.constraint === 'users_email_key') {
-          throw new ConflictException('User with this email already exists');
-        }
-      }
-      throw error;
-    }
+        return { tokenData, result: { accessToken, refreshToken } };
+      },
+    );
   }
+
   async login(userData: LoginDto) {
     const user = await this.usersRepository.findByLogin(userData.login);
     if (!user) {

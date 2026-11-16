@@ -28,8 +28,16 @@ const POSTGRES_ERRORS: Record<string, ErrorBody> = {
     message: 'Invalid input syntax',
   },
 };
+const UNIQUE_VIOLATION = '23505';
 
-function hasErrorCode(error: unknown): error is { code: string } {
+const UNIQUE_CONSTRAINT_MESSAGES: Record<string, string> = {
+  users_login_key: 'User with this login already exists',
+  users_email_lower_key: 'User with this email already exists',
+};
+
+type PostgresError = { code: string; constraint?: unknown };
+
+function isPostgresError(error: unknown): error is PostgresError {
   return (
     typeof error === 'object' &&
     error !== null &&
@@ -57,8 +65,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
       };
     }
 
-    if (hasErrorCode(exception) && exception.code in POSTGRES_ERRORS) {
-      return POSTGRES_ERRORS[exception.code];
+    if (isPostgresError(exception)) {
+      const body = this.fromPostgresError(exception);
+
+      if (body) {
+        return body;
+      }
     }
 
     this.logger.error(
@@ -71,6 +83,21 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       message: 'Internal server error',
     };
+  }
+
+  private fromPostgresError(error: PostgresError): ErrorBody | undefined {
+    if (
+      error.code === UNIQUE_VIOLATION &&
+      typeof error.constraint === 'string' &&
+      error.constraint in UNIQUE_CONSTRAINT_MESSAGES
+    ) {
+      return {
+        statusCode: HttpStatus.CONFLICT,
+        message: UNIQUE_CONSTRAINT_MESSAGES[error.constraint],
+      };
+    }
+
+    return POSTGRES_ERRORS[error.code];
   }
 
   private extractMessage(exception: HttpException): string | string[] {
