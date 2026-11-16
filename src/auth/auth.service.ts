@@ -14,29 +14,6 @@ export class AuthService {
     private refreshTokensRepository: RefreshTokensRepository,
   ) {}
 
-  private async generateTokenPair(userId: number) {
-    const accessToken = await this.authCryptoProvider.signAccessToken(userId);
-
-    const jti = randomUUID();
-
-    const refresh = await this.authCryptoProvider.signRefreshToken(userId, jti);
-
-    const tokenHash = await this.authCryptoProvider.hashRefreshToken(
-      refresh.token,
-    );
-
-    return {
-      accessToken,
-      refreshToken: refresh.token,
-      tokenData: {
-        user_id: userId,
-        jti,
-        token_hash: tokenHash,
-        expires_at: refresh.expiresAt,
-      },
-    };
-  }
-
   async register(userData: {
     login: string;
     email: string;
@@ -146,5 +123,24 @@ export class AuthService {
     }
 
     await this.refreshTokensRepository.deleteByJti(payload.jti);
+  }
+
+  private async generateTokenPair(userId: number) {
+    const accessToken = await this.authCryptoProvider.signAccessToken(userId);
+    const jti = randomUUID();
+    const refresh = await this.authCryptoProvider.signRefreshToken(userId, jti);
+    const tokenHash = await this.authCryptoProvider.hashRefreshToken(
+      refresh.token,
+    );
+    return {
+      accessToken,
+      refreshToken: refresh.token,
+      tokenData: {
+        user_id: userId,
+        jti,
+        token_hash: tokenHash,
+        expires_at: refresh.expiresAt,
+      },
+    };
   }
 }

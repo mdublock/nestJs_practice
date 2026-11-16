@@ -5,37 +5,6 @@ const isSameEmail = (a: string, b: string | undefined): boolean =>
 export class UsersRepositoryMock {
   constructor(private readonly store: E2eTestStore) {}
 
-  private async create(userData: {
-    login: string;
-    email: string;
-    password_hash: string;
-    age?: number | null;
-    about?: string | null;
-  }): Promise<TestUser> {
-    if (this.store.users.some((user) => user.login === userData.login)) {
-      throw { code: '23505', constraint: 'users_login_key' };
-    }
-
-    if (
-      this.store.users.some((user) => isSameEmail(user.email, userData.email))
-    ) {
-      throw { code: '23505', constraint: 'users_email_lower_key' };
-    }
-
-    const user: TestUser = {
-      id: this.store.nextUserId++,
-      login: userData.login,
-      email: userData.email,
-      password_hash: userData.password_hash,
-      age: userData.age ?? null,
-      about: userData.about ?? null,
-      deleted_at: null,
-    };
-
-    this.store.users.push(user);
-    return user;
-  }
-
   async createWithRefreshToken<T>(
     userData: {
       login: string;
@@ -180,5 +149,33 @@ export class UsersRepositoryMock {
       total,
       totalPages: Math.ceil(total / limit),
     };
+  }
+  
+  private async create(userData: {
+    login: string;
+    email: string;
+    password_hash: string;
+    age?: number | null;
+    about?: string | null;
+  }): Promise<TestUser> {
+    if (this.store.users.some((user) => user.login === userData.login)) {
+      throw { code: '23505', constraint: 'users_login_key' };
+    }
+    if (
+      this.store.users.some((user) => isSameEmail(user.email, userData.email))
+    ) {
+      throw { code: '23505', constraint: 'users_email_lower_key' };
+    }
+    const user: TestUser = {
+      id: this.store.nextUserId++,
+      login: userData.login,
+      email: userData.email,
+      password_hash: userData.password_hash,
+      age: userData.age ?? null,
+      about: userData.about ?? null,
+      deleted_at: null,
+    };
+    this.store.users.push(user);
+    return user;
   }
 }
